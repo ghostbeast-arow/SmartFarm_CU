@@ -5,6 +5,7 @@ import mysql.connector
 from mysql.connector import Error
 from datetime import datetime, timedelta
 import json
+import random
 from config import DB_CONFIG
 
 class DatabaseManager:
@@ -14,18 +15,27 @@ class DatabaseManager:
         self.cursor = None
         self.connect_db()
         self.create_tables()
+        
+        # 预定义的区域列表
+        self.locations = [
+            "Greenhouse A", "Greenhouse B", "Greenhouse C",
+            "Growing Area 1", "Growing Area 2", "Growing Area 3",
+            "Nursery", "Testing Area", "Display Area"
+        ]
 
     def connect_db(self):
         """连接到数据库"""
         try:
             # 使用MySQL的配置
-            mysql_config = {
-                'host': 'localhost',
-                'user': 'root',
-                'password': 'Zby_280304',
-                'database': 'smart_farm',
-                'port': 3306
-            }
+            # mysql_config = {
+            #     'host': 'localhost',
+            #     'user': 'root',
+            #     'password': 'Zby_280304',
+            #     'database': 'smart_farm',
+            #     'port': 3306
+            # }
+            mysql_config = DB_CONFIG
+
             self.connection = mysql.connector.connect(**mysql_config)
             self.cursor = self.connection.cursor(dictionary=True)
             print("数据库连接成功")
@@ -134,10 +144,48 @@ class DatabaseManager:
     def get_all_sensors(self):
         """获取所有传感器信息"""
         try:
+            # 获取基本传感器信息
             self.cursor.execute("SELECT * FROM sensors")
-            return self.cursor.fetchall()
+            sensors = self.cursor.fetchall()
+            
+            # 获取每个传感器的最新数据
+            for sensor in sensors:
+                # 获取最新数据
+                query = """
+                    SELECT value, timestamp 
+                    FROM sensor_data 
+                    WHERE sensor_id = %s 
+                    ORDER BY timestamp DESC 
+                    LIMIT 1
+                """
+                self.cursor.execute(query, (sensor['id'],))
+                latest_data = self.cursor.fetchone()
+                
+                if latest_data:
+                    sensor['current_value'] = latest_data['value']
+                    sensor['last_update'] = latest_data['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+                else:
+                    sensor['current_value'] = '--'
+                    sensor['last_update'] = 'No data'
+                
+                # 确保所有必要字段都存在
+                sensor['name'] = sensor.get('name', f'Sensor_{sensor["id"]}')
+                sensor['type'] = sensor.get('type', 'Unknown')
+                # 如果位置是Unknown，分配一个随机位置
+                if sensor.get('location') == 'Unknown':
+                    new_location = self.get_random_location()
+                    # 更新数据库中的位置
+                    update_query = "UPDATE sensors SET location = %s WHERE id = %s"
+                    self.cursor.execute(update_query, (new_location, sensor['id']))
+                    self.connection.commit()
+                    sensor['location'] = new_location
+                else:
+                    sensor['location'] = sensor.get('location', 'Unknown')
+                sensor['status'] = sensor.get('status', 'inactive')
+            
+            return sensors
         except Error as e:
-            print(f"获取传感器信息时出错: {e}")
+            print(f"Error getting sensor information: {e}")
             return []
 
     def get_sensor_by_id(self, sensor_id):
@@ -300,7 +348,7 @@ class DatabaseManager:
         
         default_crops = [
             {
-                'name': '番茄',
+                'name': 'Tomato',
                 'temp_day_limit': '20,30',
                 'temp_night_limit': '15,25',
                 'humidity_day_limit': '60,80',
@@ -311,7 +359,7 @@ class DatabaseManager:
                 'soil_night_limit': '6.0,7.0'
             },
             {
-                'name': '黄瓜',
+                'name': 'Banana',
                 'temp_day_limit': '22,32',
                 'temp_night_limit': '18,28',
                 'humidity_day_limit': '65,85',
@@ -339,4 +387,136 @@ class DatabaseManager:
             print("成功添加默认作物数据")
         except Exception as e:
             print(f"提交默认作物数据失败: {str(e)}")
-            db.session.rollback() 
+            db.session.rollback()
+
+    def get_random_location(self):
+        """获取随机区域"""
+        location = random.choice(self.locations)
+        print(f"Assigning random location to sensor: {location}")
+        return location
+
+    def create_sensor(self, sensor_id, data_type):
+        """创建新的传感器
+        
+        Args:
+            sensor_id (int): 传感器ID
+            data_type (str): 数据类型
+        """
+        try:
+            # 检查传感器是否已存在
+            query = "SELECT * FROM sensors WHERE id = %s"
+            self.cursor.execute(query, (sensor_id,))
+            if self.cursor.fetchone():
+                return True
+                
+            # 创建新传感器
+            query = """
+                INSERT INTO sensors (id, name, type, location, status)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            sensor_name = f"Sensor_{sensor_id}"
+            sensor_type = data_type
+            location = self.get_random_location()  # 使用随机区域
+            status = "active"
+            
+            self.cursor.execute(query, (sensor_id, sensor_name, sensor_type, location, status))
+            self.connection.commit()
+            print(f"Successfully created new sensor - ID: {sensor_id}, Type: {data_type}, Location: {location}")
+            return True
+            
+        except Exception as e:
+            print(f"Failed to create sensor: {e}")
+            self.connection.rollback()
+            return False
+
+    def process_mqtt_data(self, topic, payload):
+        """处理MQTT数据并写入数据库
+        
+        Args:
+            topic (str): MQTT主题
+            payload (str): MQTT消息内容
+        """
+        try:
+            # 解析主题，格式如：sensors/{sensor_id}/data
+            topic_parts = topic.split('/')
+            if len(topic_parts) != 3 or topic_parts[0] != 'sensors' or topic_parts[2] != 'data':
+                print(f"无效的主题格式: {topic}")
+                return False
+                
+            # 解析JSON数据
+            try:
+                data = json.loads(payload)
+                sensor_id = data['sensor_id']
+                data_type = data['data_type']
+                value = float(data['value'])
+                timestamp = data['timestamp']
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(f"解析数据失败: {e}")
+                return False
+            
+            # 检查传感器是否存在，如果不存在则创建
+            sensor = self.get_sensor_by_id(sensor_id)
+            if not sensor:
+                print(f"传感器 {sensor_id} 不存在，尝试创建新传感器")
+                if not self.create_sensor(sensor_id, data_type):
+                    print(f"创建传感器 {sensor_id} 失败")
+                    return False
+            
+            # 插入数据
+            self.insert_sensor_data(sensor_id, data_type, value)
+            print(f"成功写入数据 - 传感器ID: {sensor_id}, 类型: {data_type}, 值: {value}")
+            
+            # 检查是否需要触发告警
+            self._check_alerts(sensor_id, data_type, value)
+            
+            return True
+            
+        except Exception as e:
+            print(f"处理MQTT数据时出错: {e}")
+            return False
+            
+    def _check_alerts(self, sensor_id, data_type, value):
+        """检查是否需要触发告警
+        
+        Args:
+            sensor_id (int): 传感器ID
+            data_type (str): 数据类型
+            value (float): 数据值
+        """
+        try:
+            # 获取传感器对应的作物信息
+            query = """
+                SELECT c.* FROM crops c
+                JOIN sensors s ON s.crop_id = c.id
+                WHERE s.id = %s
+            """
+            self.cursor.execute(query, (sensor_id,))
+            crop = self.cursor.fetchone()
+            
+            if not crop:
+                return
+                
+            # 获取当前时间判断是白天还是晚上
+            current_hour = datetime.now().hour
+            is_daytime = 6 <= current_hour <= 18
+            
+            # 根据数据类型获取对应的阈值
+            limit_field = f"{data_type}_{'day' if is_daytime else 'night'}_limit"
+            if not hasattr(crop, limit_field):
+                return
+                
+            min_limit, max_limit = map(float, getattr(crop, limit_field).split(','))
+            
+            # 检查是否超出阈值
+            if value < min_limit or value > max_limit:
+                # 插入告警记录
+                query = """
+                    INSERT INTO alerts (sensor_id, data_type, value, threshold_min, threshold_max)
+                    VALUES (%s, %s, %s, %s, %s)
+                """
+                self.cursor.execute(query, (sensor_id, data_type, value, min_limit, max_limit))
+                self.connection.commit()
+                
+        except Exception as e:
+            print(f"检查告警时出错: {e}")
+            self.connection.rollback() 

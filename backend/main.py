@@ -28,4 +28,4 @@ def main():
             mqtt_client.cleanup()
 
 if __name__ == '__main__':
-    main() 
+    main()

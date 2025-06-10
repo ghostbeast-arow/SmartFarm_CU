@@ -136,6 +136,6 @@ class MQTTClient:
         return {
             'temperature': round(random.uniform(20, 30), 1),  # 温度范围20-30℃
             'humidity': round(random.uniform(50, 90), 1),     # 湿度范围40-60%
-            'soil_moisture': round(random.uniform(6.0, 7.5), 1),  # 土壤pH范围6.0-7.5，适合大多数植物生长
+            'soil': round(random.uniform(6.0, 7.5), 1),  # 土壤pH范围6.0-7.5，适合大多数植物生长
             'light': round(random.uniform(1000, 5000), 1)    # 光照范围1000-5000lux
         } 

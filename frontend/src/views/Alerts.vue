@@ -59,7 +59,7 @@
             </div>
             <div class="stat-info">
               <div class="stat-value">{{ stats.soil }}</div>
-              <div class="stat-label">Soil pH Alerts</div>
+              <div class="stat-label"> pH Alerts</div>
             </div>
           </div>
         </el-card>

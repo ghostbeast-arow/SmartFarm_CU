@@ -8,7 +8,7 @@ DB_CONFIG = {
     'port': 3306,
     'user': 'root',  # 替换为你的 MySQL 用户名
     'password': 'Zby_280304',  # 替换为你的 MySQL 密码
-    'database': 'smart_farm'  # 数据库名称
+    'database': 'smart_test'  # 数据库名称
 }
 
 # MQTT配置
@@ -17,7 +17,7 @@ MQTT_CONFIG = {
     'port': 1883,
     'username': '',  # MQTT broker的用户名
     'password': '',  # MQTT broker的密码
-    'topic_prefix': 'greenhouse/',
+    'topic_prefix': 'sensors/',
     'client_id': 'greenhouse_server'
 }
 

@@ -7,6 +7,28 @@ from db_manager import DatabaseManager
 from config import DB_CONFIG, MQTT_CONFIG, SENSOR_CONFIG, LOGIN_CONFIG
 from models import db, Crop
 from routes import bp
+import paho.mqtt.client as mqtt
+import json
+
+def on_connect(client, userdata, flags, rc):
+    """MQTT连接回调"""
+    print(f"已连接到MQTT服务器，返回码: {rc}")
+    # 订阅所有传感器主题
+    topic = "sensors/#"
+    client.subscribe(topic)
+    print(f"已订阅主题: {topic}")
+
+def on_message(client, userdata, msg):
+    """MQTT消息回调"""
+    try:
+        topic = msg.topic
+        payload = msg.payload.decode()
+        print(f"收到消息 - 主题: {topic}, 内容: {payload}")
+        
+        # 处理MQTT数据
+        db_manager.process_mqtt_data(topic, payload)
+    except Exception as e:
+        print(f"处理MQTT消息时出错: {e}")
 
 def create_app():
     """创建并配置 Flask 应用"""
@@ -38,6 +60,24 @@ def create_app():
 
 # 创建应用实例和数据库管理器
 app, db_manager = create_app()
+
+# 初始化MQTT客户端
+mqtt_client = mqtt.Client(client_id=MQTT_CONFIG['client_id'])
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
+
+# 如果配置了用户名和密码，则设置认证信息
+if MQTT_CONFIG['username'] and MQTT_CONFIG['password']:
+    mqtt_client.username_pw_set(MQTT_CONFIG['username'], MQTT_CONFIG['password'])
+
+try:
+    # 连接到MQTT服务器
+    mqtt_client.connect(MQTT_CONFIG['broker'], MQTT_CONFIG['port'], 60)
+    # 启动MQTT客户端循环
+    mqtt_client.loop_start()
+    print("MQTT客户端已启动")
+except Exception as e:
+    print(f"MQTT客户端启动失败: {e}")
 
 # 创建默认作物数据
 def create_default_crops():
@@ -344,7 +384,11 @@ if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5000, debug=True)
     except KeyboardInterrupt:
         print("正在关闭应用...")
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
         db_manager.cleanup()
     except Exception as e:
         print(f"应用运行出错: {e}")
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
         db_manager.cleanup() 

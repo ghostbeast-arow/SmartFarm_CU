@@ -52,11 +52,12 @@ export function useSensorData() {
       if (response && response.data) {
         sensors.value = response.data.map(sensor => ({
           ...sensor,
-          name: sensor.name || 'Unnamed Sensor',
-          type: sensor.type || 'Unknown Type',
-          location: sensor.location || 'Unknown Location',
+          // 确保所有必要字段都存在
+          name: sensor.name || `Sensor_${sensor.id}`,
+          type: sensor.type || 'Unknown',
+          location: sensor.location || 'Unknown',
           status: sensor.status || 'inactive',
-          last_update: sensor.last_update || 'Unknown Time',
+          last_update: sensor.last_update || 'No data',
           current_value: sensor.current_value || '--'
         }))
         
@@ -65,12 +66,12 @@ export function useSensorData() {
         sensors.value.forEach(sensor => {
           // 将传感器类型映射到历史数据的键名
           const typeMap = {
-            'Temperature': 'temperature',
-            'Humidity': 'humidity',
-            'Light': 'light',
-            'Soil': 'soil_moisture'
+            'temperature': 'temperature',
+            'humidity': 'humidity',
+            'light': 'light',
+            'soil': 'soil_moisture'
           }
-          const dataKey = typeMap[sensor.type]
+          const dataKey = typeMap[sensor.type.toLowerCase()]
           
           if (dataKey && historyData.value[dataKey]) {
             let value = parseFloat(sensor.current_value) || 0
